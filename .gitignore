@@ -6,3 +6,5 @@ tmp/
 
 data/**/*
 !data/.gitkeep
+cert.pem
+
