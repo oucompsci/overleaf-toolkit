@@ -1,0 +1,8 @@
+[Unit]
+Description=Service for logging the currently active users using Redis
+
+[Service]
+Type=oneshot
+ExecStart=/ssd/overleaf/overleaf-toolkit/ou-instance/monitor-users.sh
+StandardOutput=append:/ssd/overleaf/overleaf-toolkit/ou-instance/monitor-users.log
+StandardError=append:/ssd/overleaf/overleaf-toolkit/ou-instance/monitor-users.log
