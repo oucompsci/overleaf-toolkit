@@ -5,33 +5,55 @@
 # Note: This script requires sudo to restore files with correct ownership
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_DIR="$SCRIPT_DIR/backups"
+BACKUP_BASE_DIR="$SCRIPT_DIR/backups"
+BACKUP_DIR_MANUAL="$BACKUP_BASE_DIR/manual"
+BACKUP_DIR_AUTO="$BACKUP_BASE_DIR/automated"
 DATA_DIR="$SCRIPT_DIR/../data"
 
-# Check if backups directory exists
-if [ ! -d "$BACKUP_DIR" ]; then
-    echo "Error: Backups directory does not exist: $BACKUP_DIR"
-    exit 1
-fi
-
-# List all available backups
+# List all available backups from both manual and automated directories
 echo "Available backups:"
 echo ""
 
-BACKUPS=($(ls -1t "$BACKUP_DIR"/data-backup-*.tar.zst 2>/dev/null))
+# Collect backups from both directories
+BACKUPS=()
+if [ -d "$BACKUP_DIR_MANUAL" ]; then
+    while IFS= read -r backup; do
+        BACKUPS+=("$backup")
+    done < <(ls -1t "$BACKUP_DIR_MANUAL"/data-backup-*.tar.zst 2>/dev/null)
+fi
+
+if [ -d "$BACKUP_DIR_AUTO" ]; then
+    while IFS= read -r backup; do
+        BACKUPS+=("$backup")
+    done < <(ls -1t "$BACKUP_DIR_AUTO"/data-backup-*.tar.zst 2>/dev/null)
+fi
+
+# Sort all backups by modification time (newest first)
+if [ ${#BACKUPS[@]} -gt 0 ]; then
+    mapfile -t BACKUPS < <(printf '%s\n' "${BACKUPS[@]}" | xargs -I {} stat -c '%Y {}' {} | sort -rn | cut -d' ' -f2-)
+fi
 
 if [ ${#BACKUPS[@]} -eq 0 ]; then
-    echo "No backups found in $BACKUP_DIR"
+    echo "No backups found in $BACKUP_BASE_DIR"
+    echo "Checked directories: $BACKUP_DIR_MANUAL and $BACKUP_DIR_AUTO"
     exit 1
 fi
 
-# Display backups with index, name, size, and date
+# Display backups with index, name, size, date, and type
 for i in "${!BACKUPS[@]}"; do
     BACKUP_FILE="${BACKUPS[$i]}"
     BACKUP_NAME=$(basename "$BACKUP_FILE")
     BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
     BACKUP_DATE=$(stat -c %y "$BACKUP_FILE" | cut -d' ' -f1,2 | cut -d'.' -f1)
-    printf "%2d) %-45s  Size: %-8s  Date: %s\n" $((i+1)) "$BACKUP_NAME" "$BACKUP_SIZE" "$BACKUP_DATE"
+    
+    # Determine backup type based on directory
+    if [[ "$BACKUP_FILE" == *"/manual/"* ]]; then
+        BACKUP_TYPE="[Manual]"
+    else
+        BACKUP_TYPE="[Auto]  "
+    fi
+    
+    printf "%2d) %s %-45s  Size: %-8s  Date: %s\n" $((i+1)) "$BACKUP_TYPE" "$BACKUP_NAME" "$BACKUP_SIZE" "$BACKUP_DATE"
 done
 
 echo ""
@@ -56,8 +78,15 @@ else
         # User provided a path
         SELECTED_BACKUP="$SELECTION"
     else
-        # Just a filename
-        SELECTED_BACKUP="$BACKUP_DIR/$SELECTION"
+        # Just a filename - check both manual and automated directories
+        if [ -f "$BACKUP_DIR_MANUAL/$SELECTION" ]; then
+            SELECTED_BACKUP="$BACKUP_DIR_MANUAL/$SELECTION"
+        elif [ -f "$BACKUP_DIR_AUTO/$SELECTION" ]; then
+            SELECTED_BACKUP="$BACKUP_DIR_AUTO/$SELECTION"
+        else
+            # Fallback: check legacy backup directory for backward compatibility
+            SELECTED_BACKUP="$BACKUP_BASE_DIR/$SELECTION"
+        fi
     fi
 fi
 
