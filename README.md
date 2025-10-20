@@ -81,52 +81,146 @@ All configuration changes are version-controlled (see [Version Control](#version
 
 ### OU Instance Management (`ou-instance/`)
 
-A suite of custom operational scripts has been developed to assist with common administrative tasks. These scripts are located in the `ou-instance/` directory and provide functionality for backup, monitoring, and data export operations.
+A suite of custom operational scripts has been developed to assist with common administrative tasks. These scripts are located in the `ou-instance/` directory and provide functionality for backup, restoration, monitoring, and data export operations.
 
 **Available Scripts:**
 
-1. **`full-backup.sh`** - Complete Data Backup
+1. **`backup-data-directory.sh`** - Complete Data Backup
    - Creates a compressed archive of the entire `data/` directory, including MongoDB databases, Redis state, and all user-uploaded files
+   - Uses tar with zstandard compression (`.tar.zst`) for efficient storage
    - Automatically stops the Overleaf server before backup to ensure data consistency
-   - Generates timestamped backup files to prevent accidental overwrites
-   - Optionally restarts the server after backup completion
-   - Backups are stored in `ou-instance/backups/`
-   - **Use case:** Regular scheduled backups, pre-upgrade snapshots, disaster recovery preparation
+   - Generates timestamped backup files (format: `data-backup-YYYY-MM-DD_HH-MM-SS-mmm.tar.zst`)
+   - Manages backup retention: automatically keeps only the last 10 backups per directory
+   - Separates manual and automated backups into `backups/manual/` and `backups/automated/` subdirectories
+   
+   **Usage Options:**
+   - `./backup-data-directory.sh` - Interactive manual backup with user prompts
+     - Prompts for confirmation before stopping the server
+     - Prompts to restart the server after backup
+     - Prompts before deleting old backups (if more than 10 exist)
+   - `./backup-data-directory.sh --auto` - Automated/scheduled backup mode (no prompts)
+     - Suitable for cron jobs or systemd timers
+     - Automatically restarts the server after completion
+     - Automatically removes old backups to maintain the 10-backup limit
+   
+   **Use case:** Regular scheduled backups, pre-upgrade snapshots, disaster recovery preparation
 
-2. **`export-user-count.sh`** - User Statistics
-   - Queries MongoDB to retrieve the total number of registered users
-   - Exports the count to `user_count.txt` in the `ou-instance/` directory
-   - **Use case:** Monitoring user growth, generating usage reports, capacity planning
+2. **`load-backup.sh`** - Interactive Backup Restoration
+   - Lists all available backups from both `manual/` and `automated/` directories
+   - Displays backup metadata: type (Manual/Auto), filename, size, and date
+   - Allows selection by number or filename
+   - Offers to create a backup of current data before restoring (recommended)
+   - Stops the server, removes existing data, extracts the selected backup
+   - Prompts to restart the server after restoration
+   
+   **Usage:**
+   - `./load-backup.sh` - Run the interactive restoration wizard
+   
+   **Use case:** Disaster recovery, rolling back after failed upgrades, testing backup integrity
 
-3. **`export-users-as-json.sh`** - User Data Export
-   - Exports complete user records from MongoDB to a JSON file
-   - Output saved to `exported_users.json` in the `ou-instance/` directory
-   - **Use case:** Data auditing, migration preparation, compliance reporting
+3. **`export-users.sh`** - User Data Export
+   - Queries MongoDB to retrieve user statistics and complete user records
+   - Generates two output files:
+     - `user-count.txt` - Total number of registered users
+     - `exported-users.json` - Complete user records in JSON format
+   - Does not require server shutdown (read-only operation)
+   
+   **Usage:**
+   - `./export-users.sh` - Export user data to the current directory
+   
+   **Use case:** Monitoring user growth, data auditing, migration preparation, compliance reporting
+
+4. **`install-backup-service.sh`** - Automatic Backup Service Installation
+   - Installs systemd service and timer units for scheduled automatic backups
+   - Copies `overleaf-backup.service` and `overleaf-backup.timer` to `/etc/systemd/system/`
+   - Configures backups to run every 12 hours automatically
+   - Logs all backup operations to `ou-instance/backups/logs/backup.log`
+   - Prompts before overwriting existing service files
+   
+   **Usage:**
+   - `./install-backup-service.sh` - Install and activate the automatic backup service (requires sudo)
+   
+   **After Installation:**
+   - View logs: `cat /ssd/overleaf/overleaf-toolkit/ou-instance/backups/logs/backup.log`
+   - Check timer status: `systemctl list-timers overleaf-backup.timer`
+   - View service status: `systemctl status overleaf-backup.timer`
+   
+   **Use case:** Set up automatic backups for production environments
 
 **Important Notes:**
-- All scripts must be executed from within the `ou-instance/` directory
+- All scripts must be executed from the `ou-instance/` directory
 - The scripts assume the parent directory contains the Overleaf Toolkit installation
-- See [`ou-instance/README.md`](./ou-instance/README.md) for detailed usage instructions and examples
+- All scripts assume `sudo` permissions.
+- Backup files use zstandard compression for better compression ratios compared to gzip
 
 ### Automatic Backups
 
-You can view the logs for this machine,
+The OUCS Overleaf instance supports scheduled automatic backups using systemd timers. Once installed, backups run automatically in the background without manual intervention.
+
+**Installation:**
+
+To set up automatic backups, run the installation script from the `ou-instance/` directory:
+
 ```sh
-journalctl -u overleaf-backup.service # preferred method
-cat /var/log/overleaf-backup.log # or use this 
+cd /ssd/overleaf/overleaf-toolkit/ou-instance
+./install-backup-service.sh
 ```
 
-You can view the timer schedule (next backup) here, which also confirms if the backups are running in the background (if 0 listed, no timers are running).
+This script installs two systemd units:
+- **`overleaf-backup.service`** - The service that executes `backup-data-directory.sh --auto`
+- **`overleaf-backup.timer`** - The timer that triggers the service every 12 hours
 
+**Backup Schedule:**
+- First backup runs 15 minutes after system boot
+- Subsequently runs every 12 hours after the last backup completes
+- If the system was powered off during a scheduled backup, the timer will catch up and run the backup on the next boot (due to `Persistent=true` setting)
+
+**Monitoring:**
+
+View the logs to see backup history and status:
+```sh
+cat /ssd/overleaf/overleaf-toolkit/ou-instance/backups/logs/backup.log
+```
+
+Check the timer schedule to see when the next backup will run:
 ```sh
 systemctl list-timers overleaf-backup.timer
 ```
 
-View the service: /etc/systemd/system/overleaf-backup.service (what to run)
-View the timer: /etc/systemd/system/overleaf-backup.timer (when to run it)
+Expected output shows the timer status, when it last ran, and when it will run next. If the timer is not listed, automatic backups are not running.
 
-#### Remote Logs of Backups
-#### Remote Logs of Usage Statistics
+View the current status of the backup timer:
+```sh
+systemctl status overleaf-backup.timer
+```
+
+View the current status of the backup service:
+```sh
+systemctl status overleaf-backup.service
+```
+
+**Backup Storage:**
+
+Automated backups are stored in:
+```
+ou-instance/backups/automated/
+```
+
+Only the last 10 automated backups are retained. Older backups are automatically deleted to manage disk space.
+
+**Manual vs. Automatic Backups:**
+
+- **Manual backups** (created by running `backup-data-directory.sh` without `--auto`) are stored in `backups/manual/`
+- **Automated backups** (created by the systemd service or by running with `--auto`) are stored in `backups/automated/`
+- Both types can be restored using the `load-backup.sh` script
+
+**Systemd Unit Files:**
+
+The systemd unit files are located at:
+- Service definition: `/etc/systemd/system/overleaf-backup.service`
+- Timer schedule: `/etc/systemd/system/overleaf-backup.timer`
+
+Template files are maintained in the `ou-instance/` directory for version control and redeployment.
 
 ### Version Control
 
@@ -173,14 +267,48 @@ When you restore from a backup, the following components are replaced:
 **Prerequisites:**
 
 Before beginning the restoration process, ensure you have:
-- A backup archive created by `ou-instance/full-backup.sh` (located in `ou-instance/backups/`)
+- A backup archive created by `ou-instance/backup-data-directory.sh` (located in `ou-instance/backups/manual/` or `ou-instance/backups/automated/`)
 - Root or sudo access to the server
 - Sufficient disk space (at least 2x the size of the backup file to accommodate extraction)
 - A maintenance window where service downtime is acceptable (estimated 5-10 minutes)
 
-**Restoration Steps:**
+---
 
-Follow these steps carefully to restore Overleaf from a backup archive. The process involves stopping the server, replacing the data directory, and verifying the restoration.
+### Restoration Method 1: Interactive Restoration Script (Recommended)
+
+The easiest way to restore from a backup is to use the `load-backup.sh` script, which provides an interactive wizard:
+
+```bash
+cd /ssd/overleaf/overleaf-toolkit/ou-instance
+./load-backup.sh
+```
+
+**The script will:**
+1. Display a numbered list of all available backups (both manual and automated)
+2. Show backup metadata: type (Manual/Auto), filename, size, and date
+3. Prompt you to select a backup by number or filename
+4. Ask if you want to backup the current data before restoring (recommended)
+5. Warn you about data loss and ask for confirmation
+6. Stop the server, remove the existing data directory, and extract the selected backup
+7. Ask if you want to restart the server
+
+**Advantages of using the script:**
+- No need to remember tar commands or file paths
+- Automatically handles backup selection from both manual and automated directories
+- Built-in safety: offers to backup current data before restoring
+- Clear prompts and progress indicators
+- Proper error handling and validation
+
+**After restoration:**
+- Verify the web interface is accessible at `https://overleaf.cs.ou.edu`
+- Log in and check that projects and data are present
+- Check system logs with `bin/logs` if needed
+
+---
+
+### Restoration Method 2: Manual Restoration Steps
+
+If you prefer to restore manually or need to script the restoration process, follow these steps carefully. The manual process involves stopping the server, replacing the data directory, and verifying the restoration.
 
 ---
 
@@ -191,13 +319,13 @@ Before restoring from an older backup, it's prudent to preserve the current stat
 **To create a backup of the current data:**
 ```bash
 cd /ssd/overleaf/overleaf-toolkit/ou-instance
-./full-backup.sh
+./backup-data-directory.sh
 cd ..
 ```
 
 **What this does:**
-- The `full-backup.sh` script will automatically stop the Overleaf server
-- A timestamped backup file will be created in `ou-instance/backups/`
+- The `backup-data-directory.sh` script will automatically stop the Overleaf server
+- A timestamped backup file will be created in `ou-instance/backups/manual/`
 - The script will offer to restart the server (you can decline if proceeding immediately with restoration)
 
 **Important:** If you run the backup script in this step, the server will already be stopped, so you can skip Step 3 and proceed directly to Step 4.
@@ -228,7 +356,7 @@ bin/stop
 
 **Verification:** Run `bin/docker-compose ps` to confirm all containers show a status other than "running" (typically "exited").
 
-**Skip this step if:** You ran `full-backup.sh` in Step 1 and the server is already stopped.
+**Skip this step if:** You ran `backup-data-directory.sh` in Step 1 and the server is already stopped.
 
 ---
 
@@ -256,16 +384,27 @@ This creates a timestamped backup (e.g., `data.old-1760394323`) that can be rest
 
 #### Step 5: Extract the Backup Archive
 
-Locate the backup file you want to restore from in `ou-instance/backups/` and extract it.
+Locate the backup file you want to restore. Backups are stored in either:
+- `ou-instance/backups/manual/` - for manually created backups
+- `ou-instance/backups/automated/` - for automatically scheduled backups
+
+Extract the backup using tar with zstandard decompression:
 
 ```bash
-tar -xzf ou-instance/backups/data-<timestamp>.tar.gz
+tar -xaf ou-instance/backups/manual/data-backup-<timestamp>.tar.zst
+```
+
+Or for an automated backup:
+```bash
+tar -xaf ou-instance/backups/automated/data-backup-<timestamp>.tar.zst
 ```
 
 **Replace `<timestamp>`** with the actual timestamp from your backup filename. For example:
 ```bash
-tar -xzf ou-instance/backups/data-1760394323.tar.gz
+tar -xaf ou-instance/backups/manual/data-backup-2025-10-20_14-30-45-123.tar.zst
 ```
+
+**Note:** The `-a` flag automatically detects the compression format (zstandard), so you don't need to specify it explicitly.
 
 **What this does:**
 - Extracts the compressed archive
@@ -431,7 +570,7 @@ For environments requiring stronger isolation (e.g., public instances or multi-t
 
 **Update Policy:**
 - Security releases should be applied promptly using `bin/upgrade`
-- Always create a backup using `ou-instance/full-backup.sh` before upgrading
+- Always create a backup using `ou-instance/backup-data-directory.sh` before upgrading
 - Review the [CHANGELOG](./CHANGELOG.md) before applying updates
 - Test upgrades in a development environment when possible
 
@@ -456,8 +595,9 @@ The upgrade script will:
 
 **Backup Strategy:**
 - Backups require server shutdown to ensure consistency
-- No automated backup scheduling is configured by default
-- Consider setting up a cron job to run `ou-instance/full-backup.sh` during off-peak hours
+- Automated backup scheduling is available via systemd timers (see [Automatic Backups](#automatic-backups))
+- Automated backups run every 12 hours if the systemd service is installed
+- Only the last 10 backups per directory (manual/automated) are retained to manage disk space
 
 **Email Configuration:**
 - Email confirmation is disabled since SAML handles identity verification
