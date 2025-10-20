@@ -1,0 +1,8 @@
+[Unit]
+Description=Service for backing up the /data directory in the overleaf-toolkit
+
+[Service]
+Type=oneshot
+ExecStart=/ssd/overleaf/overleaf-toolkit/ou-instance/backup-data-directory.sh --auto
+StandardOutput=append:/ssd/overleaf/overleaf-toolkit/ou-instance/backups/logs/backup.log
+StandardError=append:/ssd/overleaf/overleaf-toolkit/ou-instance/backups/logs/backup.log

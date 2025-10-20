@@ -1,0 +1,13 @@
+[Unit]
+Description=Run backup every 12 hours
+
+[Timer]
+# Wait 15 minutes after boot before first run
+OnBootSec=15min
+# Run every 12 hours after last activation
+OnUnitActiveSec=12h
+# Catch up on missed runs if system was off
+Persistent=true
+
+[Install]
+WantedBy=timers.target
