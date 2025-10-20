@@ -20,6 +20,18 @@ if [ ! -f "$SCRIPT_DIR/overleaf-backup.timer" ]; then
     exit 1
 fi
 
+# Check if service or timer file exists at target location and prompt user before overwriting
+for TARGET in "$BACKUP_SERVICE_PATH" "$BACKUP_TIMER_PATH"; do
+    if [ -f "$TARGET" ]; then
+        echo "Warning: File already exists at $TARGET"
+        read -p "Do you want to overwrite it? (y/n): " OVERWRITE_CONFIRM
+        if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
+            echo "Aborting installation to preserve existing file: $TARGET"
+            exit 1
+        fi
+    fi
+done
+
 # Clone the systemd service and timer to the correct location on this system.
 echo "Installing systemd service and timer..."
 sudo cp "$SCRIPT_DIR/overleaf-backup.service" "$BACKUP_SERVICE_PATH"
