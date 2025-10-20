@@ -7,6 +7,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 DATA_DIR="$SCRIPT_DIR/../data"
+MAX_BACKUPS=10
 
 # Create backups directory if it doesn't exist
 mkdir -p "$BACKUP_DIR"
@@ -56,11 +57,37 @@ if [ -f "$BACKUP_FILE" ]; then
     echo "Backup size: $SIZE"
 fi
 
+# Manage backup retention - keep only the last MAX_BACKUPS backups
+# This is to avoid filling up the disk with too many backups / manage disk space.
+echo ""
+BACKUP_COUNT=$(ls -1 "$BACKUP_DIR"/data-backup-*.tar.zst 2>/dev/null | wc -l)
+if [ "$BACKUP_COUNT" -gt "$MAX_BACKUPS" ]; then
+    echo "Note: Only the last $MAX_BACKUPS backups are kept."
+    echo "Currently there are $BACKUP_COUNT backups."
+    
+    while [ "$BACKUP_COUNT" -gt "$MAX_BACKUPS" ]; do
+        OLDEST_BACKUP=$(ls -1t "$BACKUP_DIR"/data-backup-*.tar.zst | tail -1)
+        OLDEST_SIZE=$(du -h "$OLDEST_BACKUP" | cut -f1)
+        echo ""
+        echo "Oldest backup: $(basename "$OLDEST_BACKUP") (Size: $OLDEST_SIZE)"
+        read -p "Remove this backup to keep only the last $MAX_BACKUPS? (y/n): " REMOVE_CONFIRM
+        
+        if [[ "$REMOVE_CONFIRM" == "y" || "$REMOVE_CONFIRM" == "Y" ]]; then
+            rm -f "$OLDEST_BACKUP"
+            echo "Removed: $(basename "$OLDEST_BACKUP")"
+            BACKUP_COUNT=$((BACKUP_COUNT - 1))
+        else
+            echo "Backup not removed. You may need to manage disk space manually."
+            break
+        fi
+    done
+fi
+
 echo ""
 read -p "Do you want to restart the Overleaf server now? (y/n): " RESTART_CONFIRM
 if [[ "$RESTART_CONFIRM" == "y" || "$RESTART_CONFIRM" == "Y" ]]; then
     echo "Starting Overleaf server..."
-    "$SCRIPT_DIR/../bin/up -d"
+    "$SCRIPT_DIR/../bin/up" -d # run in detached mode to avoid blocking the terminal
     echo "Server started."
 else
     echo "Server was not restarted. Please remember to start it manually when ready."
