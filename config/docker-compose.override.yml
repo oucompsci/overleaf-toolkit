@@ -1,7 +1,7 @@
 ---
 services:
   sharelatex:
-    image: sharelatex/sharelatex:ext-ce
+    image: sharelatex/sharelatex:ext-ce-full
     volumes:
         - "${OVERLEAF_DATA_PATH}:${OVERLEAF_IN_CONTAINER_DATA_PATH}"
         - "/ssd/overleaf/overleaf-toolkit/cert.pem:${OVERLEAF_IN_CONTAINER_DATA_PATH}/cert.pem:ro"
